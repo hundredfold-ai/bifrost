@@ -11,6 +11,7 @@ Official Helm charts for deploying [Bifrost](https://github.com/maximhq/bifrost)
 ### Upcoming
 
 - Added `bifrost.framework.pricing.liveModelsSyncInterval` (default `3600` seconds, minimum `60`, `0` disables) to control how often each provider's list-models response is re-fetched in the background. Renders into `framework.pricing.live_models_sync_interval`.
+- **Breaking:** removed `complex_reasoning` from `bifrost.governance.complexityAnalyzerConfig.tier_boundaries` — the COMPLEX and REASONING complexity tiers are merged, so boundaries are now just `simple_medium` and `medium_complex` (scores at or above `medium_complex` are COMPLEX). Values files that still set `complex_reasoning` fail schema validation; delete the field before upgrading. Renders into `governance.complexity_analyzer_config.tier_boundaries`.
 
 ### 2.1.31
 

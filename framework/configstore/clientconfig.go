@@ -1273,12 +1273,41 @@ func GenerateComplexityAnalyzerConfigHashes(config *ComplexityAnalyzerConfig) (C
 		return ComplexityAnalyzerConfigHashes{}, fmt.Errorf("failed to hash complex keywords: %w", err)
 	}
 
-	return ComplexityAnalyzerConfigHashes{
+	hashes := ComplexityAnalyzerConfigHashes{
 		TierBoundaries:  tierHash,
 		SimpleKeywords:  simpleHash,
 		MediumKeywords:  mediumHash,
 		ComplexKeywords: complexHash,
-	}, nil
+	}
+
+	if normalized.Semantic != nil {
+		// Hash the scalar settings with the exemplar lists zeroed so exemplar
+		// edits do not register as a settings change (and vice versa).
+		settings := *normalized.Semantic
+		settings.Exemplars = ComplexityExemplarConfig{}
+		settingsHash, err := hashComplexityValue(settings)
+		if err != nil {
+			return ComplexityAnalyzerConfigHashes{}, fmt.Errorf("failed to hash semantic settings: %w", err)
+		}
+		simpleExemplarsHash, err := hashComplexityValue(normalized.Semantic.Exemplars.SimpleExemplars)
+		if err != nil {
+			return ComplexityAnalyzerConfigHashes{}, fmt.Errorf("failed to hash simple exemplars: %w", err)
+		}
+		mediumExemplarsHash, err := hashComplexityValue(normalized.Semantic.Exemplars.MediumExemplars)
+		if err != nil {
+			return ComplexityAnalyzerConfigHashes{}, fmt.Errorf("failed to hash medium exemplars: %w", err)
+		}
+		complexExemplarsHash, err := hashComplexityValue(normalized.Semantic.Exemplars.ComplexExemplars)
+		if err != nil {
+			return ComplexityAnalyzerConfigHashes{}, fmt.Errorf("failed to hash complex exemplars: %w", err)
+		}
+		hashes.SemanticSettings = settingsHash
+		hashes.SimpleExemplars = simpleExemplarsHash
+		hashes.MediumExemplars = mediumExemplarsHash
+		hashes.ComplexExemplars = complexExemplarsHash
+	}
+
+	return hashes, nil
 }
 
 // GenerateLegacyComplexityMediumKeywordsHash returns the Medium section hash

@@ -41,7 +41,11 @@ func TestHybrid_ContentHiddenStripsDBRowAndSkipsHydration(t *testing.T) {
 	require.NoError(t, entry.SerializeFields())
 
 	require.NoError(t, hybrid.CreateIfNotExists(ctx, entry))
-	waitForUploads(t, func() bool { return objStore.Len() == 1 })
+	// Wait for the has_object flag, not just the object: processUpload writes the
+	// flag after the Put, so waiting on objStore.Len() alone races the assertion
+	// below under parallel load.
+	waitForOffload(t, inner, "hidden-1")
+	require.Equal(t, 1, objStore.Len())
 
 	// The DB row must hold no content at all: no payload fields, no summary,
 	// no last-user-message preview.

@@ -44,7 +44,7 @@ func newTestHybrid(t *testing.T) (*HybridLogStore, LogStore, *objectstore.InMemo
 
 func waitForUploads(t *testing.T, done func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if done() {
 			return
@@ -52,6 +52,21 @@ func waitForUploads(t *testing.T, done func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for upload state")
+}
+
+// waitForOffload waits until the offload is fully complete for id: the payload is in
+// object storage AND the row's has_object flag has been committed.
+//
+// processUpload does the Put first and only then updates has_object (with retries), so
+// waiting on the object store alone returns while the DB flag is still false. Any test
+// that reads has_object — or exercises a code path that branches on it, such as billing
+// hydration — must wait for the flag, not just the object.
+func waitForOffload(t *testing.T, inner LogStore, id string) {
+	t.Helper()
+	waitForUploads(t, func() bool {
+		row, err := inner.FindByID(context.Background(), id)
+		return err == nil && row.HasObject
+	})
 }
 
 func TestHybridScopedDBDelegatesToInnerRDBStore(t *testing.T) {

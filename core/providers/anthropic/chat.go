@@ -851,6 +851,25 @@ func ToAnthropicChatRequest(ctx *schemas.BifrostContext, bifrostReq *schemas.Bif
 				}
 			}
 
+			// Anthropic rejects a message whose content contains a document
+			// block with no accompanying text block ("A text block must be
+			// included when using documents"). Prepend a placeholder so
+			// document-only messages still validate.
+			hasDocument, hasText := false, false
+			for _, b := range content {
+				if b.Type == AnthropicContentBlockTypeDocument {
+					hasDocument = true
+				} else if b.Type == AnthropicContentBlockTypeText {
+					hasText = true
+				}
+			}
+			if hasDocument && !hasText {
+				content = append([]AnthropicContentBlock{{
+					Type: AnthropicContentBlockTypeText,
+					Text: schemas.Ptr(" "),
+				}}, content...)
+			}
+
 			// Set content
 			if len(content) == 1 && content[0].Type == AnthropicContentBlockTypeText {
 				// Always use ContentBlocks for consistent array serialization

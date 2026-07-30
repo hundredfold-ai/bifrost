@@ -65,7 +65,7 @@ func completeSSEServer(t *testing.T, body string) *httptest.Server {
 
 func newStreamTestProvider(baseURL string) *OpenAIProvider {
 	return NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: baseURL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: baseURL, AllowPrivateNetwork: true},
 	}, testNoopLogger{})
 }
 
@@ -995,7 +995,7 @@ func TestResponsesStreamFallbackNullDeltaFinishStillCompletes(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			AllowedRequests: &schemas.AllowedRequests{
 				ChatCompletionStream: true,
@@ -1266,7 +1266,7 @@ func TestResponsesStreamFallbackSilentParkAfterFinishReasonEndsCleanlyOnIdleTime
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			AllowedRequests: &schemas.AllowedRequests{
 				ChatCompletionStream: true,
@@ -1333,7 +1333,7 @@ func TestResponsesStreamFallbackSilentParkAfterFinishReasonEndsCleanlyOnIdleTime
 // rawCaptureStreamProvider is newStreamTestProvider with raw-response capture on.
 func rawCaptureStreamProvider(baseURL string) *OpenAIProvider {
 	return NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig:       schemas.NetworkConfig{BaseURL: baseURL},
+		NetworkConfig:       schemas.NetworkConfig{BaseURL: baseURL, AllowPrivateNetwork: true},
 		SendBackRawResponse: true,
 	}, testNoopLogger{})
 }
@@ -1617,7 +1617,7 @@ func TestResponsesFallbackRawResponseKeepsEveryFrameExactlyOnce(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig:       schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig:       schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		SendBackRawResponse: true,
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			AllowedRequests: &schemas.AllowedRequests{

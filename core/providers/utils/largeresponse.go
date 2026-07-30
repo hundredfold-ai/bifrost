@@ -142,6 +142,22 @@ func FinalizeResponseWithLargeDetection(
 	ctx *schemas.BifrostContext,
 	resp *fasthttp.Response,
 	logger schemas.Logger,
+) ([]byte, bool, *schemas.BifrostError) {
+	return FinalizeResponseWithLargeDetectionBounded(
+		ctx,
+		resp,
+		logger,
+		schemas.DefaultMaxResponseBodyBytes,
+	)
+}
+
+// FinalizeResponseWithLargeDetectionBounded applies a hard unary response cap
+// independently of the optional large-response passthrough threshold.
+func FinalizeResponseWithLargeDetectionBounded(
+	ctx *schemas.BifrostContext,
+	resp *fasthttp.Response,
+	logger schemas.Logger,
+	maximum int,
 ) (body []byte, isLarge bool, finalizeErr *schemas.BifrostError) {
 	// "response-finalize" overhead phase: reading, decompressing (gzip/br/zstd), and
 	// copying the provider response body is payload-scaled work. Nil-safe; folds away
@@ -160,7 +176,7 @@ func FinalizeResponseWithLargeDetection(
 
 	// No threshold — normal buffered read (feature-off path)
 	if responseThreshold <= 0 {
-		body, err := CheckAndDecodeBody(resp)
+		body, err := CheckAndDecodeBodyBounded(resp, maximum)
 		if err != nil {
 			return nil, false, NewBifrostOperationError(schemas.ErrProviderResponseDecode, err)
 		}
@@ -176,7 +192,7 @@ func FinalizeResponseWithLargeDetection(
 		if logger != nil && contentLength > 0 && int64(contentLength) > responseThreshold {
 			logger.Warn("large-response fallback to buffered path: content_length=%d threshold=%d body_stream_nil=true", contentLength, responseThreshold)
 		}
-		body, err := CheckAndDecodeBody(resp)
+		body, err := CheckAndDecodeBodyBounded(resp, maximum)
 		if err != nil {
 			return nil, false, NewBifrostOperationError(schemas.ErrProviderResponseDecode, err)
 		}

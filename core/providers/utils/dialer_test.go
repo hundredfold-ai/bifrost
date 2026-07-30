@@ -107,7 +107,7 @@ func TestConfigureDialer_TCPKeepAliveEnabled(t *testing.T) {
 	// Test without existing dial (direct connection path)
 	t.Run("without_existing_dial", func(t *testing.T) {
 		client := &fasthttp.Client{}
-		ConfigureDialer(client, false)
+		ConfigureDialer(client, true)
 
 		req := fasthttp.AcquireRequest()
 		resp := fasthttp.AcquireResponse()
@@ -179,8 +179,8 @@ func TestConfigureDialer_Idempotent(t *testing.T) {
 	defer server.Close()
 
 	client := &fasthttp.Client{}
-	ConfigureDialer(client, false)
-	ConfigureDialer(client, false) // called again
+	ConfigureDialer(client, true)
+	ConfigureDialer(client, true) // called again
 
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
@@ -230,7 +230,7 @@ func TestConfigureDialer_WithRetryOnStaleConnection(t *testing.T) {
 		MaxConnsPerHost:     10,
 	}
 	// Use ConfigureDialer (the function under test) instead of manually setting RetryIfErr
-	ConfigureDialer(client, false)
+	ConfigureDialer(client, true)
 
 	// First request: establish connection in pool
 	req := fasthttp.AcquireRequest()
@@ -297,28 +297,25 @@ func TestConfigureRetry_Deprecated(t *testing.T) {
 // any TCP socket is opened.
 func TestConfigureDialer_SSRFProtection(t *testing.T) {
 	tests := []struct {
-		name    string
-		addr    string
-		wantErr string
+		name string
+		addr string
 	}{
-		// Unspecified addresses — IsPrivateIP rejects them via IsUnspecified()
-		{"0.0.0.0 all-zeros", "0.0.0.0:80", "unspecified IP"},
-
-		// RFC 1918 private ranges — LookupIP returns the literal IP, IsPrivateIP rejects it
-		{"10.x.x.x", "10.0.0.1:80", "private IP"},
-		{"172.16.x.x", "172.16.0.1:80", "private IP"},
-		{"192.168.x.x", "192.168.1.1:80", "private IP"},
-
-		// Link-local / cloud metadata
-		{"169.254.169.254 AWS metadata", "169.254.169.254:80", "link-local IP"},
-		{"169.254.x.x link-local", "169.254.1.1:80", "link-local IP"},
-
-		// IPv6 private
-		{"[fc00::1] unique-local", "[fc00::1]:80", "private IP"},
-		{"[fd00::1] unique-local", "[fd00::1]:80", "private IP"},
-
-		// Unspecified IPv6 long form — regression for bypass via 0:0:0:0:0:0:0:0
-		{"[0:0:0:0:0:0:0:0] unspecified long form", "[0:0:0:0:0:0:0:0]:80", "unspecified IP"},
+		{"0.0.0.0 all-zeros", "0.0.0.0:80"},
+		{"127.0.0.1 loopback", "127.0.0.1:80"},
+		{"localhost DNS loopback", "localhost:80"},
+		{"10.x.x.x", "10.0.0.1:80"},
+		{"172.16.x.x", "172.16.0.1:80"},
+		{"192.168.x.x", "192.168.1.1:80"},
+		{"169.254.169.254 AWS metadata", "169.254.169.254:80"},
+		{"169.254.x.x link-local", "169.254.1.1:80"},
+		{"[::1] loopback", "[::1]:80"},
+		{"[fc00::1] unique-local", "[fc00::1]:80"},
+		{"[fd00::1] unique-local", "[fd00::1]:80"},
+		{"[0:0:0:0:0:0:0:0] unspecified long form", "[0:0:0:0:0:0:0:0]:80"},
+		{"IPv4-mapped loopback", "[::ffff:127.0.0.1]:80"},
+		{"6to4 metadata transition", "[2002:a9fe:a9fe::]:80"},
+		{"NAT64 metadata transition", "[64:ff9b::a9fe:a9fe]:80"},
+		{"IPv4 multicast", "224.0.0.1:80"},
 	}
 
 	for _, tt := range tests {
@@ -327,10 +324,10 @@ func TestConfigureDialer_SSRFProtection(t *testing.T) {
 			ConfigureDialer(client, false)
 			_, err := client.Dial(tt.addr)
 			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				t.Fatal("expected non-public address rejection, got nil")
 			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			if !strings.Contains(err.Error(), "non-public IP") {
+				t.Errorf("expected non-public address error, got %q", err.Error())
 			}
 		})
 	}
@@ -366,8 +363,8 @@ func TestConfigureDialer_SSRFZeroTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected SSRF rejection with zero ReadTimeout, got nil")
 	}
-	if !strings.Contains(err.Error(), "link-local IP") {
-		t.Errorf("expected 'link-local IP' error, got %q", err.Error())
+	if !strings.Contains(err.Error(), "non-public IP") {
+		t.Errorf("expected non-public address error, got %q", err.Error())
 	}
 }
 

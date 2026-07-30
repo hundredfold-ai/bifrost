@@ -29,6 +29,8 @@ const (
 	// and, incidentally, nowhere near where the * time.Second conversion in the
 	// Bedrock transport could overflow int64 (math.MaxInt64 / time.Second).
 	HTTP2PingIntervalUpperBoundSeconds = 3600
+	DefaultMaxResponseBodyBytes       = 64 << 20
+	MaxResponseBodyBytesUpperBound    = 256 << 20
 )
 
 // Pre-defined errors for provider operations
@@ -70,6 +72,7 @@ type NetworkConfig struct {
 	StreamIdleTimeoutInSeconds     int               `json:"stream_idle_timeout_in_seconds,omitempty"` // Idle timeout per stream chunk (0 = use default 60s)
 	KeepAliveTimeoutInSeconds      int               `json:"keep_alive_timeout_in_seconds,omitempty"`  // Idle keep-alive for pooled connections; set below the upstream server's keep-alive to avoid reusing connections it has already closed. Default: 30s
 	MaxConnsPerHost                int               `json:"max_conns_per_host,omitempty"`             // Max TCP connections per provider host (default: 5000)
+	MaxResponseBodyBytes           int               `json:"max_response_body_bytes,omitempty"`        // Hard cap applied to both compressed and decoded unary response bodies
 	EnforceHTTP2                   bool              `json:"enforce_http2,omitempty"`                  // Force HTTP/2 on provider connections (relevant for net/http-based providers like Bedrock)
 	HTTP2PingIntervalInSeconds     int               `json:"http2_ping_interval_in_seconds,omitempty"` // Seconds of stream idle before an HTTP/2 keepalive PING (0 = disabled; only when enforce_http2)
 	BetaHeaderOverrides            map[string]bool   `json:"beta_header_overrides,omitempty"`          // Override default beta header support per provider (keys are prefixes like "redact-thinking-")
@@ -96,6 +99,7 @@ func (nc *NetworkConfig) UnmarshalJSON(data []byte) error {
 		StreamIdleTimeoutInSeconds     int               `json:"stream_idle_timeout_in_seconds,omitempty"`
 		KeepAliveTimeoutInSeconds      int               `json:"keep_alive_timeout_in_seconds,omitempty"`
 		MaxConnsPerHost                int               `json:"max_conns_per_host,omitempty"`
+		MaxResponseBodyBytes           int               `json:"max_response_body_bytes,omitempty"`
 		EnforceHTTP2                   bool              `json:"enforce_http2,omitempty"`
 		HTTP2PingIntervalInSeconds     int               `json:"http2_ping_interval_in_seconds,omitempty"`
 		BetaHeaderOverrides            map[string]bool   `json:"beta_header_overrides,omitempty"`
@@ -117,6 +121,7 @@ func (nc *NetworkConfig) UnmarshalJSON(data []byte) error {
 	nc.StreamIdleTimeoutInSeconds = alias.StreamIdleTimeoutInSeconds
 	nc.KeepAliveTimeoutInSeconds = alias.KeepAliveTimeoutInSeconds
 	nc.MaxConnsPerHost = alias.MaxConnsPerHost
+	nc.MaxResponseBodyBytes = alias.MaxResponseBodyBytes
 	nc.EnforceHTTP2 = alias.EnforceHTTP2
 	nc.HTTP2PingIntervalInSeconds = alias.HTTP2PingIntervalInSeconds
 	nc.BetaHeaderOverrides = alias.BetaHeaderOverrides
@@ -191,6 +196,7 @@ func (nc NetworkConfig) MarshalJSON() ([]byte, error) {
 		StreamIdleTimeoutInSeconds     int               `json:"stream_idle_timeout_in_seconds,omitempty"`
 		KeepAliveTimeoutInSeconds      int               `json:"keep_alive_timeout_in_seconds,omitempty"`
 		MaxConnsPerHost                int               `json:"max_conns_per_host,omitempty"`
+		MaxResponseBodyBytes           int               `json:"max_response_body_bytes,omitempty"`
 		EnforceHTTP2                   bool              `json:"enforce_http2,omitempty"`
 		HTTP2PingIntervalInSeconds     int               `json:"http2_ping_interval_in_seconds,omitempty"`
 		BetaHeaderOverrides            map[string]bool   `json:"beta_header_overrides,omitempty"`
@@ -209,6 +215,7 @@ func (nc NetworkConfig) MarshalJSON() ([]byte, error) {
 		StreamIdleTimeoutInSeconds: nc.StreamIdleTimeoutInSeconds,
 		KeepAliveTimeoutInSeconds:  nc.KeepAliveTimeoutInSeconds,
 		MaxConnsPerHost:            nc.MaxConnsPerHost,
+		MaxResponseBodyBytes:       nc.MaxResponseBodyBytes,
 		EnforceHTTP2:               nc.EnforceHTTP2,
 		HTTP2PingIntervalInSeconds: nc.HTTP2PingIntervalInSeconds,
 		BetaHeaderOverrides:        nc.BetaHeaderOverrides,
@@ -242,6 +249,7 @@ var DefaultNetworkConfig = NetworkConfig{
 	StreamIdleTimeoutInSeconds:     DefaultStreamIdleTimeoutInSeconds,
 	KeepAliveTimeoutInSeconds:      DefaultKeepAliveTimeoutInSeconds,
 	MaxConnsPerHost:                DefaultMaxConnsPerHost,
+	MaxResponseBodyBytes:           DefaultMaxResponseBodyBytes,
 }
 
 // ConcurrencyAndBufferSize represents configuration for concurrent operations and buffer sizes.
@@ -655,6 +663,11 @@ func (config *ProviderConfig) CheckAndSetDefaults() {
 		config.NetworkConfig.MaxConnsPerHost = DefaultMaxConnsPerHost
 	} else if config.NetworkConfig.MaxConnsPerHost > MaxConnsPerHostUpperBound {
 		config.NetworkConfig.MaxConnsPerHost = MaxConnsPerHostUpperBound
+	}
+	if config.NetworkConfig.MaxResponseBodyBytes <= 0 {
+		config.NetworkConfig.MaxResponseBodyBytes = DefaultMaxResponseBodyBytes
+	} else if config.NetworkConfig.MaxResponseBodyBytes > MaxResponseBodyBytesUpperBound {
+		config.NetworkConfig.MaxResponseBodyBytes = MaxResponseBodyBytesUpperBound
 	}
 
 	// Clamp before the seconds-to-time.Duration conversion in the Bedrock

@@ -84,9 +84,18 @@ func responsesStreamError(response *schemas.BifrostResponsesStreamResponse) *sch
 
 // ParseOpenAIError parses OpenAI error responses.
 func ParseOpenAIError(resp *fasthttp.Response) *schemas.BifrostError {
+	return ParseOpenAIErrorBounded(resp, schemas.DefaultMaxResponseBodyBytes)
+}
+
+// ParseOpenAIErrorBounded rejects an encoded or decoded provider error body
+// that exceeds the same hard memory limit used for successful unary responses.
+func ParseOpenAIErrorBounded(
+	resp *fasthttp.Response,
+	maximum int,
+) *schemas.BifrostError {
 	var errorResp schemas.BifrostError
 
-	bifrostErr := providerUtils.HandleProviderAPIError(resp, &errorResp)
+	bifrostErr := providerUtils.HandleProviderAPIErrorBounded(resp, &errorResp, maximum)
 
 	if errorResp.EventID != nil {
 		bifrostErr.EventID = errorResp.EventID

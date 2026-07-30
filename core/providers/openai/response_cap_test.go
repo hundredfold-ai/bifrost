@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,6 +100,40 @@ func TestChatCompletionHardResponseBodyLimit(t *testing.T) {
 				t.Fatalf("response = %+v, want one choice", response)
 			}
 		})
+	}
+}
+
+func TestOpenAIProviderCanDisableTransportRetries(t *testing.T) {
+	t.Parallel()
+
+	provider := NewOpenAIProvider(&schemas.ProviderConfig{
+		NetworkConfig: schemas.NetworkConfig{BaseURL: "https://api.openai.com"},
+		OpenAIConfig: &schemas.OpenAIConfig{
+			DisableTransportRetries: true,
+		},
+	}, testNoopLogger{})
+	if provider.client.RetryIfErr == nil {
+		t.Fatal("explicit no-retry policy did not install a transport decision")
+	}
+	reset, retry := provider.client.RetryIfErr(
+		nil,
+		1,
+		fmt.Errorf("connection reset by peer"),
+	)
+	if reset || retry {
+		t.Fatalf("non-replayable transport request retried: reset=%t retry=%t", reset, retry)
+	}
+
+	defaultProvider := NewOpenAIProvider(&schemas.ProviderConfig{
+		NetworkConfig: schemas.NetworkConfig{BaseURL: "https://api.openai.com"},
+	}, testNoopLogger{})
+	_, retry = defaultProvider.client.RetryIfErr(
+		nil,
+		1,
+		fmt.Errorf("connection reset by peer"),
+	)
+	if !retry {
+		t.Fatal("upstream default stale-connection behavior changed")
 	}
 }
 

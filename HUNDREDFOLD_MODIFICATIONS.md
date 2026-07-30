@@ -15,7 +15,9 @@ Hundredfold AI changes on this line:
   IPv6 transition-address cases; and
 - apply an independently configurable hard byte limit to both encoded and
   decoded unary OpenAI-compatible provider responses, including error bodies and
-  gzip payloads.
+  gzip payloads; and
+- allow OpenAI-compatible consumers to disable transport-level stale-connection
+  retries for provider attempts that are not safely replayable.
 
 Consumers should pin an exact commit from
 `https://github.com/hundredfold-ai/bifrost` and record both that fork commit and

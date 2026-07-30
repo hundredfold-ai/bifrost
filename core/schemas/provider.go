@@ -559,7 +559,8 @@ type ProviderConfig struct {
 
 // OpenAIConfig holds OpenAI-specific provider configuration.
 type OpenAIConfig struct {
-	DisableStore bool `json:"disable_store"` // When true, forces store=false on all outgoing OpenAI requests (default: false)
+	DisableStore            bool `json:"disable_store"`             // When true, forces store=false on all outgoing OpenAI requests (default: false)
+	DisableTransportRetries bool `json:"disable_transport_retries"` // When true, disables fasthttp stale-connection retries for non-replayable requests
 }
 
 func (config *ProviderConfig) CheckAndSetDefaults() {

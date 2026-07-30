@@ -19,6 +19,9 @@ Hundredfold AI changes on this line:
 - allow OpenAI-compatible consumers to disable transport-level stale-connection
   retries for provider attempts that are not safely replayable.
 
+Each source or test file changed from the recorded upstream base carries a
+`Modified by Hundredfold AI` notice and points to the module notice.
+
 Consumers should pin an exact commit from
 `https://github.com/hundredfold-ai/bifrost` and record both that fork commit and
 the upstream base above in their third-party notices and software bill of

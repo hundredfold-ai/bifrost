@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package openai provides the OpenAI provider implementation for the Bifrost framework.
 package openai
 

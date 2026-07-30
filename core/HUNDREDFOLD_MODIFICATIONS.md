@@ -15,4 +15,7 @@ unary response handling for the Model Gateway:
 - OpenAI-compatible deployments can disable transport-level stale-connection
   retries when a provider attempt is not safely replayable.
 
+Each source or test file changed from the recorded upstream base carries a
+`Modified by Hundredfold AI` notice that points here.
+
 The root `HUNDREDFOLD_MODIFICATIONS.md` contains the complete fork notice.

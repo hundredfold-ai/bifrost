@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package providers implements various LLM providers and their utility functions.
 // This file contains common utility functions used across different provider implementations.
 package utils

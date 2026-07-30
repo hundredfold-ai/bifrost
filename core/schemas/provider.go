@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package schemas defines the core schemas and types used by the Bifrost system.
 package schemas
 

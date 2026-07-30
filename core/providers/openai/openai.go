@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package openai provides the OpenAI provider implementation for the Bifrost framework.
 package openai
 
@@ -49,6 +51,7 @@ func NewOpenAIProvider(config *schemas.ProviderConfig, logger schemas.Logger) *O
 		MaxConnWaitTimeout:  requestTimeout,
 		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
 		ConnPoolStrategy:    fasthttp.FIFO,
+		MaxResponseBodySize: config.NetworkConfig.MaxResponseBodyBytes,
 	}
 
 	// // Pre-warm response pools
@@ -59,6 +62,15 @@ func NewOpenAIProvider(config *schemas.ProviderConfig, logger schemas.Logger) *O
 	// Configure proxy and retry policy
 	client = providerUtils.ConfigureProxy(client, config.ProxyConfig, logger)
 	client = providerUtils.ConfigureDialer(client, config.NetworkConfig.AllowPrivateNetwork)
+	if config.OpenAIConfig != nil && config.OpenAIConfig.DisableTransportRetries {
+		client.RetryIfErr = func(
+			_ *fasthttp.Request,
+			_ int,
+			_ error,
+		) (resetTimeout bool, retry bool) {
+			return false, false
+		}
+	}
 	client = providerUtils.ConfigureTLS(client, config.NetworkConfig, logger)
 	streamingClient := providerUtils.BuildStreamingClient(client)
 	// Set default BaseURL if not provided
@@ -895,10 +907,25 @@ func HandleOpenAIChatCompletionRequest(
 		if customErrorConverter != nil {
 			return nil, providerUtils.EnrichError(ctx, customErrorConverter(resp), jsonData, nil, sendBackRawRequest, sendBackRawResponse, latency)
 		}
-		return nil, providerUtils.EnrichError(ctx, ParseOpenAIError(resp), jsonData, nil, sendBackRawRequest, sendBackRawResponse, latency)
+		return nil, providerUtils.EnrichError(
+			ctx,
+			ParseOpenAIErrorBounded(resp, activeClient.MaxResponseBodySize),
+			jsonData,
+			nil,
+			sendBackRawRequest,
+			sendBackRawResponse,
+			latency,
+		)
 	}
 
-	body, lpResult, finalErr := finalizeOpenAIResponse(ctx, resp, latency, providerName, logger)
+	body, lpResult, finalErr := finalizeOpenAIResponseBounded(
+		ctx,
+		resp,
+		latency,
+		providerName,
+		logger,
+		activeClient.MaxResponseBodySize,
+	)
 	respOwned = false // ownership transferred
 	if finalErr != nil {
 		return nil, providerUtils.EnrichError(ctx, finalErr, jsonData, nil, sendBackRawRequest, sendBackRawResponse, latency)

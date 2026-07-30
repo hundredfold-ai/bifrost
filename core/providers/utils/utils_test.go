@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package utils
 
 import (
@@ -5,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +32,69 @@ func TestRewriteJSONModelValue(t *testing.T) {
 	}
 	if !strings.Contains(string(out), `"model":"gpt-5"`) {
 		t.Fatalf("expected rewritten model, got: %s", string(out))
+	}
+}
+
+func TestCheckAndDecodeBodyBounded(t *testing.T) {
+	t.Parallel()
+
+	const maximum = 32
+	gzipBody := func(t *testing.T, value []byte) []byte {
+		t.Helper()
+		var encoded bytes.Buffer
+		writer := gzip.NewWriter(&encoded)
+		if _, err := writer.Write(value); err != nil {
+			t.Fatalf("gzip write: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("gzip close: %v", err)
+		}
+		return encoded.Bytes()
+	}
+
+	tests := []struct {
+		name     string
+		body     []byte
+		encoding string
+		want     []byte
+		wantErr  error
+	}{
+		{name: "plain within limit", body: bytes.Repeat([]byte("a"), maximum), want: bytes.Repeat([]byte("a"), maximum)},
+		{name: "plain over limit", body: bytes.Repeat([]byte("a"), maximum+1), wantErr: ErrResponseBodyTooLarge},
+		{name: "gzip within decoded limit", body: gzipBody(t, bytes.Repeat([]byte("a"), maximum)), encoding: "gzip", want: bytes.Repeat([]byte("a"), maximum)},
+		{name: "gzip decoded bomb", body: gzipBody(t, bytes.Repeat([]byte("a"), maximum+1)), encoding: "gzip", wantErr: ErrResponseBodyTooLarge},
+		{name: "gzip wire body over limit", body: gzipBody(t, []byte("small")), encoding: "gzip", wantErr: ErrResponseBodyTooLarge},
+	}
+	// A tiny limit makes the valid gzip envelope itself exceed the encoded cap.
+	tests[len(tests)-1].body = gzipBody(t, []byte("small"))
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := fasthttp.AcquireResponse()
+			defer fasthttp.ReleaseResponse(response)
+			response.SetBodyRaw(test.body)
+			if test.encoding != "" {
+				response.Header.Set("Content-Encoding", test.encoding)
+			}
+			limit := maximum
+			if test.name == "gzip wire body over limit" {
+				limit = len(test.body) - 1
+			}
+
+			got, err := CheckAndDecodeBodyBounded(response, limit)
+			if test.wantErr != nil {
+				if !errors.Is(err, test.wantErr) {
+					t.Fatalf("error = %v, want %v", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !bytes.Equal(got, test.want) {
+				t.Fatalf("decoded body length = %d, want %d", len(got), len(test.want))
+			}
+		})
 	}
 }
 

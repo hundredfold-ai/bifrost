@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package utils
 
 import (
@@ -24,7 +26,7 @@ func TestBuildStreamingClient_ZerosReadWriteTimeout(t *testing.T) {
 		MaxConnWaitTimeout: 15 * time.Second,
 		MaxConnsPerHost:    123,
 	}
-	ConfigureDialer(base, false)
+	ConfigureDialer(base, true)
 
 	stream := BuildStreamingClient(base)
 
@@ -94,7 +96,7 @@ func TestBuildStreamingClient_LongStreamSurvives(t *testing.T) {
 		ReadTimeout:  1 * time.Second, // would abort the stream without the fix
 		WriteTimeout: 1 * time.Second,
 	}
-	ConfigureDialer(base, false)
+	ConfigureDialer(base, true)
 	stream := BuildStreamingClient(base)
 
 	req := fasthttp.AcquireRequest()

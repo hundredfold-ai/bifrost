@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package openai provides the OpenAI provider implementation for the Bifrost framework.
 package openai
 
@@ -124,7 +126,30 @@ func finalizeOpenAIResponse(
 	providerName schemas.ModelProvider,
 	logger schemas.Logger,
 ) ([]byte, *largePayloadResult, *schemas.BifrostError) {
-	body, isLarge, bifrostErr := providerUtils.FinalizeResponseWithLargeDetection(ctx, resp, logger)
+	return finalizeOpenAIResponseBounded(
+		ctx,
+		resp,
+		latency,
+		providerName,
+		logger,
+		schemas.DefaultMaxResponseBodyBytes,
+	)
+}
+
+func finalizeOpenAIResponseBounded(
+	ctx *schemas.BifrostContext,
+	resp *fasthttp.Response,
+	latency time.Duration,
+	providerName schemas.ModelProvider,
+	logger schemas.Logger,
+	maximum int,
+) ([]byte, *largePayloadResult, *schemas.BifrostError) {
+	body, isLarge, bifrostErr := providerUtils.FinalizeResponseWithLargeDetectionBounded(
+		ctx,
+		resp,
+		logger,
+		maximum,
+	)
 	if bifrostErr != nil {
 		fasthttp.ReleaseResponse(resp)
 		return nil, nil, bifrostErr

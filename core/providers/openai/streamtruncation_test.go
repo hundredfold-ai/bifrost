@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package openai
 
 import (
@@ -62,7 +64,7 @@ func completeSSEServer(t *testing.T, body string) *httptest.Server {
 
 func newStreamTestProvider(baseURL string) *OpenAIProvider {
 	return NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: baseURL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: baseURL, AllowPrivateNetwork: true},
 	}, testNoopLogger{})
 }
 

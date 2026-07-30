@@ -23,6 +23,8 @@ const (
 	DefaultMaxConnsPerHost            = 5000
 	MaxConnsPerHostUpperBound         = 10000
 	DefaultMaxIdleConnsPerHost        = 40
+	DefaultMaxResponseBodyBytes       = 64 << 20
+	MaxResponseBodyBytesUpperBound    = 256 << 20
 )
 
 // Pre-defined errors for provider operations
@@ -64,6 +66,7 @@ type NetworkConfig struct {
 	StreamIdleTimeoutInSeconds     int               `json:"stream_idle_timeout_in_seconds,omitempty"` // Idle timeout per stream chunk (0 = use default 60s)
 	KeepAliveTimeoutInSeconds      int               `json:"keep_alive_timeout_in_seconds,omitempty"`  // Idle keep-alive for pooled connections; set below the upstream server's keep-alive to avoid reusing connections it has already closed. Default: 30s
 	MaxConnsPerHost                int               `json:"max_conns_per_host,omitempty"`             // Max TCP connections per provider host (default: 5000)
+	MaxResponseBodyBytes           int               `json:"max_response_body_bytes,omitempty"`        // Hard cap applied to both compressed and decoded unary response bodies
 	EnforceHTTP2                   bool              `json:"enforce_http2,omitempty"`                  // Force HTTP/2 on provider connections (relevant for net/http-based providers like Bedrock)
 	BetaHeaderOverrides            map[string]bool   `json:"beta_header_overrides,omitempty"`          // Override default beta header support per provider (keys are prefixes like "redact-thinking-")
 	AllowPrivateNetwork            bool              `json:"allow_private_network,omitempty"`          // Allow connections to RFC 1918 private IPs (for k8s pods, LAN deployments). Link-local (169.254.x.x) is always blocked.
@@ -89,6 +92,7 @@ func (nc *NetworkConfig) UnmarshalJSON(data []byte) error {
 		StreamIdleTimeoutInSeconds     int               `json:"stream_idle_timeout_in_seconds,omitempty"`
 		KeepAliveTimeoutInSeconds      int               `json:"keep_alive_timeout_in_seconds,omitempty"`
 		MaxConnsPerHost                int               `json:"max_conns_per_host,omitempty"`
+		MaxResponseBodyBytes           int               `json:"max_response_body_bytes,omitempty"`
 		EnforceHTTP2                   bool              `json:"enforce_http2,omitempty"`
 		BetaHeaderOverrides            map[string]bool   `json:"beta_header_overrides,omitempty"`
 		AllowPrivateNetwork            bool              `json:"allow_private_network,omitempty"`
@@ -109,6 +113,7 @@ func (nc *NetworkConfig) UnmarshalJSON(data []byte) error {
 	nc.StreamIdleTimeoutInSeconds = alias.StreamIdleTimeoutInSeconds
 	nc.KeepAliveTimeoutInSeconds = alias.KeepAliveTimeoutInSeconds
 	nc.MaxConnsPerHost = alias.MaxConnsPerHost
+	nc.MaxResponseBodyBytes = alias.MaxResponseBodyBytes
 	nc.EnforceHTTP2 = alias.EnforceHTTP2
 	nc.BetaHeaderOverrides = alias.BetaHeaderOverrides
 	nc.AllowPrivateNetwork = alias.AllowPrivateNetwork
@@ -182,6 +187,7 @@ func (nc NetworkConfig) MarshalJSON() ([]byte, error) {
 		StreamIdleTimeoutInSeconds     int               `json:"stream_idle_timeout_in_seconds,omitempty"`
 		KeepAliveTimeoutInSeconds      int               `json:"keep_alive_timeout_in_seconds,omitempty"`
 		MaxConnsPerHost                int               `json:"max_conns_per_host,omitempty"`
+		MaxResponseBodyBytes           int               `json:"max_response_body_bytes,omitempty"`
 		EnforceHTTP2                   bool              `json:"enforce_http2,omitempty"`
 		BetaHeaderOverrides            map[string]bool   `json:"beta_header_overrides,omitempty"`
 		AllowPrivateNetwork            bool              `json:"allow_private_network,omitempty"`
@@ -199,6 +205,7 @@ func (nc NetworkConfig) MarshalJSON() ([]byte, error) {
 		StreamIdleTimeoutInSeconds: nc.StreamIdleTimeoutInSeconds,
 		KeepAliveTimeoutInSeconds:  nc.KeepAliveTimeoutInSeconds,
 		MaxConnsPerHost:            nc.MaxConnsPerHost,
+		MaxResponseBodyBytes:       nc.MaxResponseBodyBytes,
 		EnforceHTTP2:               nc.EnforceHTTP2,
 		BetaHeaderOverrides:        nc.BetaHeaderOverrides,
 		AllowPrivateNetwork:        nc.AllowPrivateNetwork,
@@ -231,6 +238,7 @@ var DefaultNetworkConfig = NetworkConfig{
 	StreamIdleTimeoutInSeconds:     DefaultStreamIdleTimeoutInSeconds,
 	KeepAliveTimeoutInSeconds:      DefaultKeepAliveTimeoutInSeconds,
 	MaxConnsPerHost:                DefaultMaxConnsPerHost,
+	MaxResponseBodyBytes:           DefaultMaxResponseBodyBytes,
 }
 
 // ConcurrencyAndBufferSize represents configuration for concurrent operations and buffer sizes.
@@ -591,6 +599,11 @@ func (config *ProviderConfig) CheckAndSetDefaults() {
 		config.NetworkConfig.MaxConnsPerHost = DefaultMaxConnsPerHost
 	} else if config.NetworkConfig.MaxConnsPerHost > MaxConnsPerHostUpperBound {
 		config.NetworkConfig.MaxConnsPerHost = MaxConnsPerHostUpperBound
+	}
+	if config.NetworkConfig.MaxResponseBodyBytes <= 0 {
+		config.NetworkConfig.MaxResponseBodyBytes = DefaultMaxResponseBodyBytes
+	} else if config.NetworkConfig.MaxResponseBodyBytes > MaxResponseBodyBytesUpperBound {
+		config.NetworkConfig.MaxResponseBodyBytes = MaxResponseBodyBytesUpperBound
 	}
 
 	// Create a defensive copy of ExtraHeaders to prevent data races

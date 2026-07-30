@@ -138,11 +138,27 @@ func FinalizeResponseWithLargeDetection(
 	resp *fasthttp.Response,
 	logger schemas.Logger,
 ) ([]byte, bool, *schemas.BifrostError) {
+	return FinalizeResponseWithLargeDetectionBounded(
+		ctx,
+		resp,
+		logger,
+		schemas.DefaultMaxResponseBodyBytes,
+	)
+}
+
+// FinalizeResponseWithLargeDetectionBounded applies a hard unary response cap
+// independently of the optional large-response passthrough threshold.
+func FinalizeResponseWithLargeDetectionBounded(
+	ctx *schemas.BifrostContext,
+	resp *fasthttp.Response,
+	logger schemas.Logger,
+	maximum int,
+) ([]byte, bool, *schemas.BifrostError) {
 	responseThreshold, _ := ctx.Value(schemas.BifrostContextKeyLargeResponseThreshold).(int64)
 
 	// No threshold — normal buffered read (feature-off path)
 	if responseThreshold <= 0 {
-		body, err := CheckAndDecodeBody(resp)
+		body, err := CheckAndDecodeBodyBounded(resp, maximum)
 		if err != nil {
 			return nil, false, NewBifrostOperationError(schemas.ErrProviderResponseDecode, err)
 		}
@@ -166,7 +182,7 @@ func FinalizeResponseWithLargeDetection(
 			return bodyBytes, false, nil
 		}
 		// No stream — buffered fallback
-		body, err := CheckAndDecodeBody(resp)
+		body, err := CheckAndDecodeBodyBounded(resp, maximum)
 		if err != nil {
 			return nil, false, NewBifrostOperationError(schemas.ErrProviderResponseDecode, err)
 		}
@@ -213,7 +229,7 @@ func FinalizeResponseWithLargeDetection(
 			return nil, true, nil
 		}
 		// No stream — buffered fallback
-		body, err := CheckAndDecodeBody(resp)
+		body, err := CheckAndDecodeBodyBounded(resp, maximum)
 		if err != nil {
 			return nil, false, NewBifrostOperationError(schemas.ErrProviderResponseDecode, err)
 		}
@@ -228,7 +244,7 @@ func FinalizeResponseWithLargeDetection(
 		if logger != nil {
 			logger.Warn("large-response fallback to buffered path: content_length=%d threshold=%d body_stream_nil=true", contentLength, responseThreshold)
 		}
-		body, err := CheckAndDecodeBody(resp)
+		body, err := CheckAndDecodeBodyBounded(resp, maximum)
 		if err != nil {
 			return nil, false, NewBifrostOperationError(schemas.ErrProviderResponseDecode, err)
 		}

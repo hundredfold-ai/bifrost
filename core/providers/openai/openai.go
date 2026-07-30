@@ -49,6 +49,7 @@ func NewOpenAIProvider(config *schemas.ProviderConfig, logger schemas.Logger) *O
 		MaxConnWaitTimeout:  requestTimeout,
 		MaxConnDuration:     time.Second * time.Duration(schemas.DefaultMaxConnDurationInSeconds),
 		ConnPoolStrategy:    fasthttp.FIFO,
+		MaxResponseBodySize: config.NetworkConfig.MaxResponseBodyBytes,
 	}
 
 	// // Pre-warm response pools
@@ -895,10 +896,25 @@ func HandleOpenAIChatCompletionRequest(
 		if customErrorConverter != nil {
 			return nil, providerUtils.EnrichError(ctx, customErrorConverter(resp), jsonData, nil, sendBackRawRequest, sendBackRawResponse, latency)
 		}
-		return nil, providerUtils.EnrichError(ctx, ParseOpenAIError(resp), jsonData, nil, sendBackRawRequest, sendBackRawResponse, latency)
+		return nil, providerUtils.EnrichError(
+			ctx,
+			ParseOpenAIErrorBounded(resp, activeClient.MaxResponseBodySize),
+			jsonData,
+			nil,
+			sendBackRawRequest,
+			sendBackRawResponse,
+			latency,
+		)
 	}
 
-	body, lpResult, finalErr := finalizeOpenAIResponse(ctx, resp, latency, providerName, logger)
+	body, lpResult, finalErr := finalizeOpenAIResponseBounded(
+		ctx,
+		resp,
+		latency,
+		providerName,
+		logger,
+		activeClient.MaxResponseBodySize,
+	)
 	respOwned = false // ownership transferred
 	if finalErr != nil {
 		return nil, providerUtils.EnrichError(ctx, finalErr, jsonData, nil, sendBackRawRequest, sendBackRawResponse, latency)

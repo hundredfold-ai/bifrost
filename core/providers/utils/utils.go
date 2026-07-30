@@ -214,6 +214,10 @@ func getLogger() schemas.Logger {
 
 var UnsupportedSpeechStreamModels = []string{"tts-1", "tts-1-hd"}
 
+// ErrResponseBodyTooLarge is returned before a unary provider response can be
+// copied or decoded beyond its configured hard memory bound.
+var ErrResponseBodyTooLarge = errors.New("provider response body exceeds configured limit")
+
 // noop is a reusable no-op function returned by MakeRequestWithContext on the normal path.
 var noop = func() {}
 
@@ -468,23 +472,30 @@ func ConfigureDialer(client *fasthttp.Client, allowPrivateNetwork bool) *fasthtt
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no usable address resolved for %s", host)
+			}
+			// Validate the entire DNS answer before dialing any member. A mixed
+			// public/private answer is rejected as a unit so record ordering
+			// cannot bypass the policy.
+			for _, ip := range ips {
+				if !network.IsPublicIP(ip) &&
+					!(allowPrivateNetwork &&
+						!network.IsLinkLocal(ip) &&
+						!ip.IsUnspecified() &&
+						(ip.IsLoopback() || network.IsPrivateIP(ip))) {
+					return nil, fmt.Errorf(
+						"connection to non-public IP %s is not allowed",
+						ip,
+					)
+				}
+			}
 			dialer := &net.Dialer{
 				Timeout:         client.ReadTimeout,
 				KeepAliveConfig: keepAliveCfg,
 			}
 			var lastErr error
 			for _, ip := range ips {
-				// Unspecified (0.0.0.0, ::) and link-local (169.254.x.x, fe80::) are always blocked
-				if ip.IsUnspecified() {
-					return nil, fmt.Errorf("connection to unspecified IP %s is not allowed", ip)
-				}
-				if network.IsLinkLocal(ip) {
-					return nil, fmt.Errorf("connection to link-local IP %s is not allowed", ip)
-				}
-				// RFC 1918 blocked unless operator explicitly opted in; loopback always allowed
-				if !ip.IsLoopback() && !allowPrivateNetwork && network.IsPrivateIP(ip) {
-					return nil, fmt.Errorf("connection to private IP %s is not allowed", ip)
-				}
 				conn, err = dialer.Dial("tcp", net.JoinHostPort(ip.String(), port))
 				if err == nil {
 					break
@@ -1494,21 +1505,34 @@ func SetExtraHeadersHTTP(ctx context.Context, req *http.Request, extraHeaders ma
 // on responses that are almost certainly valid JSON. errorResp must be a pointer to
 // the target struct for unmarshaling.
 func HandleProviderAPIError(resp *fasthttp.Response, errorResp any) *schemas.BifrostError {
+	return HandleProviderAPIErrorBounded(
+		resp,
+		errorResp,
+		schemas.DefaultMaxResponseBodyBytes,
+	)
+}
+
+// HandleProviderAPIErrorBounded parses an error without allocating beyond the
+// configured encoded or decoded response-body limit.
+func HandleProviderAPIErrorBounded(
+	resp *fasthttp.Response,
+	errorResp any,
+	maximum int,
+) *schemas.BifrostError {
 	statusCode := resp.StatusCode()
 
 	// Decode body
-	decodedBody, err := CheckAndDecodeBody(resp)
+	decodedBody, err := CheckAndDecodeBodyBounded(resp, maximum)
 	if err != nil {
-		// Decode failed - still capture raw body for RawResponse
-		rawBody := resp.Body()
 		var rawErrorResponse interface{}
-		if len(rawBody) > 0 {
-			// Try to unmarshal, but if that fails, store as string
+		rawBody := resp.Body()
+		// Preserve the established diagnostic behavior for malformed, already
+		// bounded responses. Never retain or parse a response rejected for size.
+		if !errors.Is(err, ErrResponseBodyTooLarge) && len(rawBody) <= maximum {
 			if unmarshalErr := sonic.Unmarshal(rawBody, &rawErrorResponse); unmarshalErr != nil {
 				rawErrorResponse = string(rawBody)
 			}
 		}
-
 		return &schemas.BifrostError{
 			IsBifrostError: false,
 			StatusCode:     &statusCode,
@@ -1783,9 +1807,26 @@ func CheckOperationAllowed(defaultProvider schemas.ModelProvider, config *schema
 // It returns a copy of the body to avoid race conditions when the response is released
 // back to fasthttp's buffer pool. Uses pooled gzip readers to reduce GC pressure.
 func CheckAndDecodeBody(resp *fasthttp.Response) ([]byte, error) {
+	return CheckAndDecodeBodyBounded(resp, schemas.DefaultMaxResponseBodyBytes)
+}
+
+// CheckAndDecodeBodyBounded applies the same hard bound to the compressed wire
+// body and to the decoded body. It deliberately does not use the large-response
+// streaming threshold, which is a passthrough feature rather than a rejection
+// limit.
+func CheckAndDecodeBodyBounded(resp *fasthttp.Response, maximum int) ([]byte, error) {
+	if resp == nil {
+		return nil, errors.New("provider response is required")
+	}
+	if maximum <= 0 || maximum > schemas.MaxResponseBodyBytesUpperBound {
+		maximum = schemas.DefaultMaxResponseBodyBytes
+	}
+	body := resp.Body()
+	if len(body) > maximum {
+		return nil, ErrResponseBodyTooLarge
+	}
 	contentEncoding := strings.ToLower(strings.TrimSpace(string(resp.Header.Peek("Content-Encoding"))))
 	if strings.Contains(contentEncoding, "gzip") {
-		body := resp.Body()
 		if len(body) == 0 {
 			return nil, nil
 		}
@@ -1797,14 +1838,16 @@ func CheckAndDecodeBody(resp *fasthttp.Response) ([]byte, error) {
 		}
 		defer ReleaseGzipReader(gz)
 
-		decompressed, err := io.ReadAll(gz)
+		decompressed, err := io.ReadAll(io.LimitReader(gz, int64(maximum)+1))
 		if err != nil {
 			return nil, err
+		}
+		if len(decompressed) > maximum {
+			return nil, ErrResponseBodyTooLarge
 		}
 		return decompressed, nil
 	}
 	// Copy the body to avoid race conditions when response is released back to pool
-	body := resp.Body()
 	result := make([]byte, len(body))
 	copy(result, body)
 	return result, nil

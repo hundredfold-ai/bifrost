@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package gemini provides types and structures for interacting with Google's Gemini API.
 package gemini
 
@@ -2119,6 +2121,14 @@ type FunctionResponse struct {
 type GeminiEmbeddingResponse struct {
 	Embeddings []GeminiEmbedding     `json:"embeddings"`
 	Metadata   *EmbedContentMetadata `json:"metadata,omitempty"`
+	// UsageMetadata is how the Gemini API reports what a batchEmbedContents call consumed: one
+	// figure for the whole batch, rather than per-embedding statistics as Vertex reports it.
+	UsageMetadata *EmbeddingUsageMetadata `json:"usageMetadata,omitempty"`
+}
+
+// EmbeddingUsageMetadata is the Gemini API's account of an embedding call's input tokens.
+type EmbeddingUsageMetadata struct {
+	PromptTokenCount int32 `json:"promptTokenCount,omitempty"`
 }
 
 // GeminiEmbedContentResponse is the wire format for a single :embedContent response.

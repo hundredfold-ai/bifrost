@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package gemini
 
 import (
@@ -163,20 +165,32 @@ func ToBifrostEmbeddingResponse(geminiResp *GeminiEmbeddingResponse, model strin
 		bifrostResp.Data[i] = embeddingData
 	}
 
-	// Convert usage metadata if available
-	if geminiResp.Metadata != nil || (len(geminiResp.Embeddings) > 0 && geminiResp.Embeddings[0].Statistics != nil) {
-		bifrostResp.Usage = &schemas.BifrostLLMUsage{}
-
-		// Use statistics from the first embedding if available
-		if geminiResp.Embeddings[0].Statistics != nil {
-			bifrostResp.Usage.PromptTokens = int(geminiResp.Embeddings[0].Statistics.TokenCount)
-		} else if geminiResp.Metadata != nil {
-			// Fall back to metadata if statistics are not available
-			bifrostResp.Usage.PromptTokens = int(geminiResp.Metadata.BillableCharacterCount)
+	// Token usage, in the order a provider is most likely to report it.
+	//
+	// The Gemini API reports one usageMetadata for the whole batch. Vertex reports a statistics
+	// block on each embedding instead, and those are summed: an embedding call is billed for every
+	// input, so taking the first input's count understates a batch by everything after it.
+	//
+	// metadata.billableCharacterCount is deliberately not used. It counts characters, not tokens,
+	// and reporting it as prompt tokens overstated usage by the characters-per-token ratio. Where no
+	// token count is reported, Usage stays nil so a caller can tell "unreported" from "zero".
+	var promptTokens int
+	reported := false
+	if geminiResp.UsageMetadata != nil && geminiResp.UsageMetadata.PromptTokenCount > 0 {
+		promptTokens, reported = int(geminiResp.UsageMetadata.PromptTokenCount), true
+	} else {
+		for _, embedding := range geminiResp.Embeddings {
+			if embedding.Statistics != nil && embedding.Statistics.TokenCount > 0 {
+				promptTokens += int(embedding.Statistics.TokenCount)
+				reported = true
+			}
 		}
-
-		// Set total tokens same as prompt tokens for embeddings
-		bifrostResp.Usage.TotalTokens = bifrostResp.Usage.PromptTokens
+	}
+	if reported {
+		bifrostResp.Usage = &schemas.BifrostLLMUsage{
+			PromptTokens: promptTokens,
+			TotalTokens:  promptTokens,
+		}
 	}
 
 	return bifrostResp

@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package gemini_test
 
 import (
@@ -220,6 +222,41 @@ func TestToBifrostEmbeddingResponsePreservesPrecision(t *testing.T) {
 	got := resp.Data[0].Embedding.EmbeddingArray[0]
 	assert.Equal(t, want, got)
 	assert.NotEqual(t, float64(float32(want)), got)
+}
+
+func TestToBifrostEmbeddingResponseReadsBatchUsageMetadata(t *testing.T) {
+	resp := gemini.ToBifrostEmbeddingResponse(&gemini.GeminiEmbeddingResponse{
+		Embeddings:    []gemini.GeminiEmbedding{{Values: []float64{0.1}}, {Values: []float64{0.2}}},
+		UsageMetadata: &gemini.EmbeddingUsageMetadata{PromptTokenCount: 37},
+	}, "gemini-embedding-2")
+
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 37, resp.Usage.PromptTokens)
+	assert.Equal(t, 37, resp.Usage.TotalTokens)
+}
+
+func TestToBifrostEmbeddingResponseSumsEveryInputsStatistics(t *testing.T) {
+	resp := gemini.ToBifrostEmbeddingResponse(&gemini.GeminiEmbeddingResponse{
+		Embeddings: []gemini.GeminiEmbedding{
+			{Values: []float64{0.1}, Statistics: &gemini.ContentEmbeddingStatistics{TokenCount: 5}},
+			{Values: []float64{0.2}, Statistics: &gemini.ContentEmbeddingStatistics{TokenCount: 7}},
+		},
+	}, "gemini-embedding-001")
+
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 12, resp.Usage.PromptTokens)
+}
+
+func TestToBifrostEmbeddingResponseNeverReportsCharactersAsTokens(t *testing.T) {
+	resp := gemini.ToBifrostEmbeddingResponse(&gemini.GeminiEmbeddingResponse{
+		Embeddings: []gemini.GeminiEmbedding{{Values: []float64{0.1}}},
+		Metadata:   &gemini.EmbedContentMetadata{BillableCharacterCount: 400},
+	}, "gemini-embedding-001")
+
+	require.NotNil(t, resp)
+	assert.Nil(t, resp.Usage, "an unreported token count must stay unreported, not become a character count")
 }
 
 // TestThoughtSignatureInToolCalls tests that thought signatures are properly embedded in tool call IDs

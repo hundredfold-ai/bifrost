@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package vertex
 
 import (
@@ -141,6 +143,17 @@ func getAuthTokenSource(key schemas.Key) (oauth2.TokenSource, error) {
 	authCredentials := key.VertexKeyConfig.AuthCredentials
 	clientKey := getClientKey(authCredentials.GetValue())
 
+	// A pre-minted access token is used as it is and never pooled. It is a short-lived bearer token
+	// the caller obtained for this one request -- typically by impersonating a service account from
+	// its own workload identity -- and pooling it would keep credential material alive past the
+	// request it was minted for, keyed by a digest anyone holding the token could recompute.
+	if token, ok, err := presentedAccessToken(authCredentials.GetValue()); ok || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		return oauth2.StaticTokenSource(token), nil
+	}
+
 	// Fast path: return cached token source.
 	if cached, ok := vertexTokenSourcePool.Load(clientKey); ok {
 		return cached.(oauth2.TokenSource), nil
@@ -195,6 +208,28 @@ func getAuthTokenSource(key schemas.Key) (oauth2.TokenSource, error) {
 	// that one — both are equally valid, but sharing maximises token reuse.
 	actual, _ := vertexTokenSourcePool.LoadOrStore(clientKey, tokenSource)
 	return actual.(oauth2.TokenSource), nil
+}
+
+// presentedAccessToken recognises credentials of the form
+// {"type":"access_token","access_token":"..."}: a bearer token the caller already holds. ok is false
+// for any other credential, which then takes the service-account and default-credential paths
+// unchanged.
+func presentedAccessToken(authCredentials string) (*oauth2.Token, bool, error) {
+	if authCredentials == "" {
+		return nil, false, nil
+	}
+	var presented struct {
+		Type        string `json:"type"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := sonic.Unmarshal([]byte(authCredentials), &presented); err != nil ||
+		presented.Type != "access_token" {
+		return nil, false, nil
+	}
+	if strings.TrimSpace(presented.AccessToken) == "" {
+		return nil, true, fmt.Errorf("invalid google auth credentials: empty access_token")
+	}
+	return &oauth2.Token{AccessToken: presented.AccessToken, TokenType: "Bearer"}, true, nil
 }
 
 // GetProviderKey returns the provider identifier for Vertex.
@@ -1713,7 +1748,14 @@ func (provider *VertexProvider) Rerank(ctx *schemas.BifrostContext, key schemas.
 		return nil, bifrostErr
 	}
 
-	completeURL := fmt.Sprintf("https://discoveryengine.googleapis.com/v1/%s:rank", options.RankingConfig)
+	// The Discovery Engine origin, unless the provider configuration names one. A deployment that pins
+	// the origin it dials -- or a test that points it at loopback -- otherwise had no way to, because
+	// this was the one Vertex call whose host ignored the network configuration entirely.
+	rankOrigin := strings.TrimSuffix(strings.TrimSpace(provider.networkConfig.BaseURL), "/")
+	if rankOrigin == "" {
+		rankOrigin = "https://discoveryengine.googleapis.com"
+	}
+	completeURL := fmt.Sprintf("%s/v1/%s:rank", rankOrigin, options.RankingConfig)
 
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()

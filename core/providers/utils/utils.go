@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -561,6 +562,42 @@ func ConfigureRetry(client *fasthttp.Client) *fasthttp.Client {
 	return client
 }
 
+// nonPublicKind names what kind of non-public address a refused answer was, in
+// the vocabulary upstream's per-address refusals used, so an operator reading
+// the error learns which policy refused it and not only that one did.
+func nonPublicKind(ip net.IP) string {
+	switch {
+	case ip.IsUnspecified():
+		return "unspecified IP"
+	case network.IsLinkLocal(ip):
+		return "link-local IP"
+	case ip.IsLoopback():
+		return "loopback IP"
+	case network.IsPrivateIP(ip):
+		return "private IP"
+	default:
+		return "reserved IP"
+	}
+}
+
+// loopbackDialsForTesting lets a test binary dial the loopback servers its
+// tests start, without each test opting into private-network access.
+//
+// The fork refuses loopback unless private networking is enabled, which is the
+// point of its dial policy and the opposite of upstream's default, and most of
+// upstream's own tests dial an httptest server on 127.0.0.1. It admits loopback
+// and nothing else -- private and link-local answers are still refused -- and
+// only inside a test binary: testing.Testing() is false in every other build, so
+// setting it outside a test changes nothing.
+var loopbackDialsForTesting atomic.Bool
+
+// AllowLoopbackDialsForTesting admits loopback answers for the rest of this test
+// binary. It has no effect outside a test binary. Call it from a test package's
+// init; never from production code.
+func AllowLoopbackDialsForTesting() {
+	loopbackDialsForTesting.Store(true)
+}
+
 // ConfigureDialer configures the client's connection behavior:
 //  1. Sets up the stale-connection retry policy (see network.StaleConnectionRetryIfErr).
 //  2. Wraps the Dial function to enable TCP keepalive on all connections,
@@ -632,14 +669,17 @@ func ConfigureDialer(client *fasthttp.Client, allowPrivateNetwork bool) *fasthtt
 			// public/private answer is rejected as a unit so record ordering
 			// cannot bypass the policy.
 			for _, ip := range ips {
+				if ip.IsLoopback() && loopbackDialsForTesting.Load() && testing.Testing() {
+					continue
+				}
 				if !network.IsPublicIP(ip) &&
 					!(allowPrivateNetwork &&
 						!network.IsLinkLocal(ip) &&
 						!ip.IsUnspecified() &&
 						(ip.IsLoopback() || network.IsPrivateIP(ip))) {
 					return nil, fmt.Errorf(
-						"connection to non-public IP %s is not allowed",
-						ip,
+						"connection to non-public IP %s is not allowed: %s",
+						ip, nonPublicKind(ip),
 					)
 				}
 			}

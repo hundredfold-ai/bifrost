@@ -2,8 +2,8 @@
 
 This module is distributed from the maintained fork at
 `https://github.com/hundredfold-ai/bifrost` under the upstream Apache License
-2.0. It is based on upstream commit
-`ec1dd920619955415bd6d61ab9ecff71f170ee22`.
+2.0. It is based on upstream release `core/v1.11.0`, commit
+`b096be9fb6fe83e932fd1718b78e328d678e5555`.
 
 Hundredfold AI modified the provider network dial policy and OpenAI-compatible
 unary response handling for the Model Gateway:

@@ -1,6 +1,9 @@
 package vertex
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
@@ -112,4 +115,68 @@ func (response *VertexEmbeddingResponse) ToBifrostEmbeddingResponse() *schemas.B
 		ExtraFields: schemas.BifrostResponseExtraFields{
 		},
 	}
+}
+
+// isVertexGeminiEmbeddingModel reports whether Vertex serves a model only through :embedContent.
+//
+// Gemini Embedding 2 is not a :predict model on Vertex: a regional :predict answers 404 for it, and
+// it is served at the global location alone. The predicate is upstream's (maximhq/bifrost#2559), so
+// a later rebase onto a release carrying that change replaces this one without changing which models
+// take which route.
+func isVertexGeminiEmbeddingModel(model string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "gemini-embedding-2")
+}
+
+// ToVertexGeminiEmbeddingRequest converts a Bifrost embedding request to Vertex's :embedContent
+// body. The endpoint embeds exactly one content per call, so a request carrying more than one input
+// is refused here rather than silently embedding the first: a caller with several inputs makes
+// several calls, which is what upstream requires as well.
+func ToVertexGeminiEmbeddingRequest(bifrostReq *schemas.BifrostEmbeddingRequest) (*VertexGeminiEmbeddingRequest, error) {
+	if bifrostReq == nil || bifrostReq.Input == nil {
+		return nil, fmt.Errorf("embedding input is not provided")
+	}
+	var text string
+	switch {
+	case bifrostReq.Input.Text != nil:
+		text = *bifrostReq.Input.Text
+	case len(bifrostReq.Input.Texts) == 1:
+		text = bifrostReq.Input.Texts[0]
+	case len(bifrostReq.Input.Texts) > 1:
+		return nil, fmt.Errorf("vertex gemini embedding takes one input per request, got %d", len(bifrostReq.Input.Texts))
+	default:
+		return nil, fmt.Errorf("vertex gemini embedding takes text input")
+	}
+	request := &VertexGeminiEmbeddingRequest{
+		Content: VertexGeminiEmbeddingContent{Parts: []VertexGeminiEmbeddingPart{{Text: text}}},
+	}
+	if bifrostReq.Params != nil {
+		request.OutputDimensionality = bifrostReq.Params.Dimensions
+		request.ExtraParams = bifrostReq.Params.ExtraParams
+	}
+	return request, nil
+}
+
+// ToBifrostEmbeddingResponse converts one :embedContent answer. Usage is the call's own
+// usageMetadata, which :embedContent reports for the whole call rather than per embedding.
+func (response *VertexGeminiEmbeddingResponse) ToBifrostEmbeddingResponse() *schemas.BifrostEmbeddingResponse {
+	if response == nil || len(response.Embedding.Values) == 0 {
+		return nil
+	}
+	converted := &schemas.BifrostEmbeddingResponse{
+		Object: "list",
+		Data: []schemas.EmbeddingData{{
+			Object: "embedding",
+			Embedding: schemas.EmbeddingStruct{
+				EmbeddingArray: append([]float64(nil), response.Embedding.Values...),
+			},
+			Index: 0,
+		}},
+	}
+	if response.UsageMetadata != nil {
+		converted.Usage = &schemas.BifrostLLMUsage{
+			PromptTokens: response.UsageMetadata.PromptTokenCount,
+			TotalTokens:  response.UsageMetadata.TotalTokenCount,
+		}
+	}
+	return converted
 }

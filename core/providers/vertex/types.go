@@ -126,6 +126,41 @@ type VertexEmbeddingParameters struct {
 }
 
 // VertexEmbeddingRequest represents the complete embedding request to Vertex AI
+// VertexGeminiEmbeddingRequest is the body of a Vertex :embedContent call: one content, as Gemini
+// spells it.
+type VertexGeminiEmbeddingRequest struct {
+	Content              VertexGeminiEmbeddingContent `json:"content"`
+	OutputDimensionality *int                         `json:"outputDimensionality,omitempty"`
+	ExtraParams          map[string]interface{}       `json:"-"`
+}
+
+func (r *VertexGeminiEmbeddingRequest) GetExtraParams() map[string]interface{} {
+	return r.ExtraParams
+}
+
+// VertexGeminiEmbeddingContent is the one content an :embedContent call embeds.
+type VertexGeminiEmbeddingContent struct {
+	Parts []VertexGeminiEmbeddingPart `json:"parts"`
+}
+
+// VertexGeminiEmbeddingPart is a text part of that content.
+type VertexGeminiEmbeddingPart struct {
+	Text string `json:"text"`
+}
+
+// VertexGeminiEmbeddingResponse is what a Vertex :embedContent call answers. Measured against
+// gemini-embedding-2 at the global location: {"embedding":{"values":[...]},"usageMetadata":
+// {"promptTokenCount":N,"totalTokenCount":N,...}}.
+type VertexGeminiEmbeddingResponse struct {
+	Embedding struct {
+		Values []float64 `json:"values"`
+	} `json:"embedding"`
+	UsageMetadata *struct {
+		PromptTokenCount int `json:"promptTokenCount"`
+		TotalTokenCount  int `json:"totalTokenCount"`
+	} `json:"usageMetadata,omitempty"`
+}
+
 type VertexEmbeddingRequest struct {
 	Instances   []VertexEmbeddingInstance  `json:"instances"`            // List of embedding instances
 	Parameters  *VertexEmbeddingParameters `json:"parameters,omitempty"` // Optional parameters

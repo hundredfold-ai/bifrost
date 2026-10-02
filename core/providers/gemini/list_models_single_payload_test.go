@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package gemini
 
 import (
@@ -41,7 +43,7 @@ func TestListModelsByKey_ParsesSingleModelPayload(t *testing.T) {
 	defer ts.Close()
 
 	provider := NewGeminiProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: ts.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: ts.URL, AllowPrivateNetwork: true},
 	}, testNoopLogger{})
 
 	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)

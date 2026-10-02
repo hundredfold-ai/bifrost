@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package gemini
 
 import (
@@ -102,7 +104,7 @@ func TestFileUploadSendsContentTypeToGemini(t *testing.T) {
 	defer ts.Close()
 
 	provider := NewGeminiProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: ts.URL + "/v1beta"},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: ts.URL + "/v1beta", AllowPrivateNetwork: true},
 	}, testNoopLogger{})
 
 	ctx := schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)

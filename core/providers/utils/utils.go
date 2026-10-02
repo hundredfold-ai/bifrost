@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 // Package providers implements various LLM providers and their utility functions.
 // This file contains common utility functions used across different provider implementations.
 package utils
@@ -23,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -338,6 +341,10 @@ func getLogger() schemas.Logger {
 
 var UnsupportedSpeechStreamModels = []string{"tts-1", "tts-1-hd"}
 
+// ErrResponseBodyTooLarge is returned before a unary provider response can be
+// copied or decoded beyond its configured hard memory bound.
+var ErrResponseBodyTooLarge = errors.New("provider response body exceeds configured limit")
+
 // noop is a reusable no-op function returned by MakeRequestWithContext on the normal path.
 var noop = func() {}
 
@@ -555,6 +562,42 @@ func ConfigureRetry(client *fasthttp.Client) *fasthttp.Client {
 	return client
 }
 
+// nonPublicKind names what kind of non-public address a refused answer was, in
+// the vocabulary upstream's per-address refusals used, so an operator reading
+// the error learns which policy refused it and not only that one did.
+func nonPublicKind(ip net.IP) string {
+	switch {
+	case ip.IsUnspecified():
+		return "unspecified IP"
+	case network.IsLinkLocal(ip):
+		return "link-local IP"
+	case ip.IsLoopback():
+		return "loopback IP"
+	case network.IsPrivateIP(ip):
+		return "private IP"
+	default:
+		return "reserved IP"
+	}
+}
+
+// loopbackDialsForTesting lets a test binary dial the loopback servers its
+// tests start, without each test opting into private-network access.
+//
+// The fork refuses loopback unless private networking is enabled, which is the
+// point of its dial policy and the opposite of upstream's default, and most of
+// upstream's own tests dial an httptest server on 127.0.0.1. It admits loopback
+// and nothing else -- private and link-local answers are still refused -- and
+// only inside a test binary: testing.Testing() is false in every other build, so
+// setting it outside a test changes nothing.
+var loopbackDialsForTesting atomic.Bool
+
+// AllowLoopbackDialsForTesting admits loopback answers for the rest of this test
+// binary. It has no effect outside a test binary. Call it from a test package's
+// init; never from production code.
+func AllowLoopbackDialsForTesting() {
+	loopbackDialsForTesting.Store(true)
+}
+
 // ConfigureDialer configures the client's connection behavior:
 //  1. Sets up the stale-connection retry policy (see network.StaleConnectionRetryIfErr).
 //  2. Wraps the Dial function to enable TCP keepalive on all connections,
@@ -619,23 +662,33 @@ func ConfigureDialer(client *fasthttp.Client, allowPrivateNetwork bool) *fasthtt
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no usable address resolved for %s", host)
+			}
+			// Validate the entire DNS answer before dialing any member. A mixed
+			// public/private answer is rejected as a unit so record ordering
+			// cannot bypass the policy.
+			for _, ip := range ips {
+				if ip.IsLoopback() && loopbackDialsForTesting.Load() && testing.Testing() {
+					continue
+				}
+				if !network.IsPublicIP(ip) &&
+					!(allowPrivateNetwork &&
+						!network.IsLinkLocal(ip) &&
+						!ip.IsUnspecified() &&
+						(ip.IsLoopback() || network.IsPrivateIP(ip))) {
+					return nil, fmt.Errorf(
+						"connection to non-public IP %s is not allowed: %s",
+						ip, nonPublicKind(ip),
+					)
+				}
+			}
 			dialer := &net.Dialer{
 				Timeout:         client.ReadTimeout,
 				KeepAliveConfig: keepAliveCfg,
 			}
 			var lastErr error
 			for _, ip := range ips {
-				// Unspecified (0.0.0.0, ::) and link-local (169.254.x.x, fe80::) are always blocked
-				if ip.IsUnspecified() {
-					return nil, fmt.Errorf("connection to unspecified IP %s is not allowed", ip)
-				}
-				if network.IsLinkLocal(ip) {
-					return nil, fmt.Errorf("connection to link-local IP %s is not allowed", ip)
-				}
-				// RFC 1918 blocked unless operator explicitly opted in; loopback always allowed
-				if !ip.IsLoopback() && !allowPrivateNetwork && network.IsPrivateIP(ip) {
-					return nil, fmt.Errorf("connection to private IP %s is not allowed", ip)
-				}
 				conn, err = dialer.Dial("tcp", net.JoinHostPort(ip.String(), port))
 				if err == nil {
 					break
@@ -2159,21 +2212,34 @@ func rootErrorMessage(raw interface{}) string {
 // on responses that are almost certainly valid JSON. errorResp must be a pointer to
 // the target struct for unmarshaling.
 func HandleProviderAPIError(resp *fasthttp.Response, errorResp any) *schemas.BifrostError {
+	return HandleProviderAPIErrorBounded(
+		resp,
+		errorResp,
+		schemas.DefaultMaxResponseBodyBytes,
+	)
+}
+
+// HandleProviderAPIErrorBounded parses an error without allocating beyond the
+// configured encoded or decoded response-body limit.
+func HandleProviderAPIErrorBounded(
+	resp *fasthttp.Response,
+	errorResp any,
+	maximum int,
+) *schemas.BifrostError {
 	statusCode := resp.StatusCode()
 
 	// Decode body
-	decodedBody, err := CheckAndDecodeBody(resp)
+	decodedBody, err := CheckAndDecodeBodyBounded(resp, maximum)
 	if err != nil {
-		// Decode failed - still capture raw body for RawResponse
-		rawBody := resp.Body()
 		var rawErrorResponse interface{}
-		if len(rawBody) > 0 {
-			// Try to unmarshal, but if that fails, store as string
+		rawBody := resp.Body()
+		// Preserve the established diagnostic behavior for malformed, already
+		// bounded responses. Never retain or parse a response rejected for size.
+		if !errors.Is(err, ErrResponseBodyTooLarge) && len(rawBody) <= maximum {
 			if unmarshalErr := sonic.Unmarshal(rawBody, &rawErrorResponse); unmarshalErr != nil {
 				rawErrorResponse = string(rawBody)
 			}
 		}
-
 		return &schemas.BifrostError{
 			IsBifrostError: false,
 			StatusCode:     &statusCode,
@@ -2479,7 +2545,26 @@ func CheckOperationAllowed(defaultProvider schemas.ModelProvider, config *schema
 // fasthttp's buffer pool. Content codings are decoded in reverse application order,
 // as required by RFC 9110, using the shared pooled readers.
 func CheckAndDecodeBody(resp *fasthttp.Response) ([]byte, error) {
+	return CheckAndDecodeBodyBounded(resp, schemas.DefaultMaxResponseBodyBytes)
+}
+
+// CheckAndDecodeBodyBounded applies the same hard bound to the wire body and to
+// the output of every content-decoding step. A small compressed payload cannot
+// expand past the bound through any coding, gzip, deflate, brotli or zstd, and
+// layered codings are each bounded in turn. It deliberately does not use the
+// large-response streaming threshold, which is a passthrough feature rather than
+// a rejection limit.
+func CheckAndDecodeBodyBounded(resp *fasthttp.Response, maximum int) ([]byte, error) {
+	if resp == nil {
+		return nil, errors.New("provider response is required")
+	}
+	if maximum <= 0 || maximum > schemas.MaxResponseBodyBytesUpperBound {
+		maximum = schemas.DefaultMaxResponseBodyBytes
+	}
 	body := resp.Body()
+	if len(body) > maximum {
+		return nil, ErrResponseBodyTooLarge
+	}
 	if len(body) == 0 {
 		return nil, nil
 	}
@@ -2499,56 +2584,63 @@ func CheckAndDecodeBody(resp *fasthttp.Response) ([]byte, error) {
 		// return the decoder alongside its error, so a bare return could drop one
 		// from the pool. The gzip and deflate constructors return nil there, where
 		// Release is a no-op.
+		var err error
 		switch encoding {
 		case "", "identity":
 			continue
 		case "gzip", "x-gzip":
-			gz, err := AcquireGzipReader(reader)
-			if err != nil {
+			gz, acquireErr := AcquireGzipReader(reader)
+			if acquireErr != nil {
 				ReleaseGzipReader(gz)
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
+				return nil, fmt.Errorf("decode %s response body: %w", encoding, acquireErr)
 			}
-			result, err = io.ReadAll(gz)
+			result, err = readBounded(gz, maximum)
 			ReleaseGzipReader(gz)
-			if err != nil {
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
-			}
 		case "deflate":
-			fr, err := AcquireFlateReader(reader)
-			if err != nil {
+			fr, acquireErr := AcquireFlateReader(reader)
+			if acquireErr != nil {
 				ReleaseFlateReader(fr)
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
+				return nil, fmt.Errorf("decode %s response body: %w", encoding, acquireErr)
 			}
-			result, err = io.ReadAll(fr)
+			result, err = readBounded(fr, maximum)
 			ReleaseFlateReader(fr)
-			if err != nil {
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
-			}
 		case "br":
 			br := AcquireBrotliReader(reader)
-			var err error
-			result, err = io.ReadAll(br)
+			result, err = readBounded(br, maximum)
 			ReleaseBrotliReader(br)
-			if err != nil {
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
-			}
 		case "zstd":
-			dec, err := AcquireZstdDecoder(reader)
-			if err != nil {
+			dec, acquireErr := AcquireZstdDecoder(reader)
+			if acquireErr != nil {
 				ReleaseZstdDecoder(dec)
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
+				return nil, fmt.Errorf("decode %s response body: %w", encoding, acquireErr)
 			}
-			result, err = io.ReadAll(dec)
+			result, err = readBounded(dec, maximum)
 			ReleaseZstdDecoder(dec)
-			if err != nil {
-				return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
-			}
 		default:
 			return nil, fmt.Errorf("unsupported Content-Encoding %q", encoding)
+		}
+		if errors.Is(err, ErrResponseBodyTooLarge) {
+			return nil, err
+		}
+		if err != nil {
+			return nil, fmt.Errorf("decode %s response body: %w", encoding, err)
 		}
 	}
 
 	return result, nil
+}
+
+// readBounded reads a decoded body and refuses one that decodes past maximum,
+// without ever holding more than one byte beyond it.
+func readBounded(reader io.Reader, maximum int) ([]byte, error) {
+	decoded, err := io.ReadAll(io.LimitReader(reader, int64(maximum)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(decoded) > maximum {
+		return nil, ErrResponseBodyTooLarge
+	}
+	return decoded, nil
 }
 
 // IsHTMLResponse checks if the response is HTML by examining the Content-Type header

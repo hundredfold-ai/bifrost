@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package utils
 
 import (
@@ -106,7 +108,7 @@ func newTestStreamingClient(maxConnsPerHost int) (*fasthttp.Client, *connCounter
 		MaxConnDuration:     300 * time.Second,
 		ConnPoolStrategy:    fasthttp.FIFO,
 	}
-	base = ConfigureDialer(base, false)
+	base = ConfigureDialer(base, true)
 
 	counter := &connCounter{}
 	inner := base.Dial

@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package gemini
 
 import (
@@ -297,7 +299,7 @@ func TestGeminiBatchResponsesWithoutMetadataDoNotPanic(t *testing.T) {
 	defer ts.Close()
 
 	provider := NewGeminiProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: ts.URL + "/v1beta"},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: ts.URL + "/v1beta", AllowPrivateNetwork: true},
 	}, testNoopLogger{})
 	keys := []schemas.Key{{Value: *schemas.NewSecretVar("dummy-key")}}
 	newCtx := func() *schemas.BifrostContext {

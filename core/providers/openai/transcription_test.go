@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package openai
 
 import (
@@ -60,6 +62,7 @@ func TestTranscription_DiarizedJSON_StringSegmentID(t *testing.T) {
 		NetworkConfig: schemas.NetworkConfig{
 			BaseURL:                        server.URL,
 			DefaultRequestTimeoutInSeconds: 30,
+			AllowPrivateNetwork:            true,
 		},
 	}, &testLogger{})
 
@@ -149,6 +152,7 @@ func TestTranscription_DiarizedJSON_OmitsAbsentDurationAndTask(t *testing.T) {
 		NetworkConfig: schemas.NetworkConfig{
 			BaseURL:                        server.URL,
 			DefaultRequestTimeoutInSeconds: 30,
+			AllowPrivateNetwork:            true,
 		},
 	}, &testLogger{})
 
@@ -217,6 +221,7 @@ func TestTranscription_VerboseJSON_StillWorks(t *testing.T) {
 		NetworkConfig: schemas.NetworkConfig{
 			BaseURL:                        server.URL,
 			DefaultRequestTimeoutInSeconds: 30,
+			AllowPrivateNetwork:            true,
 		},
 	}, &testLogger{})
 

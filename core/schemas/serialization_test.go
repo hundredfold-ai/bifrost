@@ -1,6 +1,9 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package schemas
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"strings"
@@ -1179,6 +1182,57 @@ func TestNetworkConfig_HTTP2PingInterval(t *testing.T) {
 	cfgOverflow := &ProviderConfig{NetworkConfig: NetworkConfig{EnforceHTTP2: true, HTTP2PingIntervalInSeconds: HTTP2PingIntervalUpperBoundSeconds + 1}}
 	cfgOverflow.CheckAndSetDefaults()
 	assert.Equal(t, HTTP2PingIntervalUpperBoundSeconds, cfgOverflow.NetworkConfig.HTTP2PingIntervalInSeconds)
+}
+
+func TestNetworkConfig_MaxResponseBodyBytesRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	networkConfig := NetworkConfig{MaxResponseBodyBytes: 1024 * 1024}
+	encoded, err := json.Marshal(networkConfig)
+	if err != nil {
+		t.Fatalf("marshal network config: %v", err)
+	}
+	if !bytes.Contains(encoded, []byte(`"max_response_body_bytes":1048576`)) {
+		t.Fatalf("encoded network config does not contain response cap: %s", encoded)
+	}
+
+	var decoded NetworkConfig
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal network config: %v", err)
+	}
+	if decoded.MaxResponseBodyBytes != networkConfig.MaxResponseBodyBytes {
+		t.Fatalf(
+			"max response body bytes = %d, want %d",
+			decoded.MaxResponseBodyBytes,
+			networkConfig.MaxResponseBodyBytes,
+		)
+	}
+}
+
+func TestProviderConfig_MaxResponseBodyBytesDefaultsAndClamps(t *testing.T) {
+	t.Parallel()
+
+	defaulted := ProviderConfig{}
+	defaulted.CheckAndSetDefaults()
+	if defaulted.NetworkConfig.MaxResponseBodyBytes != DefaultMaxResponseBodyBytes {
+		t.Fatalf(
+			"default response cap = %d, want %d",
+			defaulted.NetworkConfig.MaxResponseBodyBytes,
+			DefaultMaxResponseBodyBytes,
+		)
+	}
+
+	clamped := ProviderConfig{NetworkConfig: NetworkConfig{
+		MaxResponseBodyBytes: MaxResponseBodyBytesUpperBound + 1,
+	}}
+	clamped.CheckAndSetDefaults()
+	if clamped.NetworkConfig.MaxResponseBodyBytes != MaxResponseBodyBytesUpperBound {
+		t.Fatalf(
+			"clamped response cap = %d, want %d",
+			clamped.NetworkConfig.MaxResponseBodyBytes,
+			MaxResponseBodyBytesUpperBound,
+		)
+	}
 }
 
 // TestNormalizeResponsesToolType verifies that versioned/provider-specific tool type

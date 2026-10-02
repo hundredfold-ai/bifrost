@@ -1,3 +1,5 @@
+// Modified by Hundredfold AI; see HUNDREDFOLD_MODIFICATIONS.md.
+
 package openai
 
 import (
@@ -91,7 +93,7 @@ func TestCustomOpenAIProviderRerankUsesGenericEndpoint(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			CustomProviderKey: "hawk",
 			BaseProviderType:  schemas.OpenAI,
@@ -166,7 +168,7 @@ func TestCustomOpenAIRerankPreservesUpstreamDocument(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			CustomProviderKey: "hawk",
 			BaseProviderType:  schemas.OpenAI,
@@ -221,7 +223,7 @@ func TestCustomOpenAIRerankLargeResponseThresholdReturnsResults(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			CustomProviderKey: "hawk",
 			BaseProviderType:  schemas.OpenAI,
@@ -315,7 +317,7 @@ func TestCustomOpenAIRerankMapsSearchUnits(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			CustomProviderKey: "hawk",
 			BaseProviderType:  schemas.OpenAI,
@@ -370,7 +372,7 @@ func TestCustomOpenAIRerankLargePayloadStreamsBody(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(&schemas.ProviderConfig{
-		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL},
+		NetworkConfig: schemas.NetworkConfig{BaseURL: server.URL, AllowPrivateNetwork: true},
 		CustomProviderConfig: &schemas.CustomProviderConfig{
 			CustomProviderKey: "hawk",
 			BaseProviderType:  schemas.OpenAI,

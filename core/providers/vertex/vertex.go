@@ -1738,10 +1738,14 @@ func (provider *VertexProvider) Embedding(ctx *schemas.BifrostContext, key schem
 		return nil, providerUtils.NewConfigurationError("region is not set in key config")
 	}
 
+	geminiEmbedding := isVertexGeminiEmbeddingModel(request.Model)
 	jsonBody, bifrostErr := providerUtils.CheckContextAndGetRequestBody(
 		ctx,
 		request,
 		func() (providerUtils.RequestBodyWithExtraParams, error) {
+			if geminiEmbedding {
+				return ToVertexGeminiEmbeddingRequest(request)
+			}
 			return ToVertexEmbeddingRequest(request), nil
 		},
 	)
@@ -1760,7 +1764,11 @@ func (provider *VertexProvider) Embedding(ctx *schemas.BifrostContext, key schem
 	if key.Value.GetValue() != "" {
 		authQuery = fmt.Sprintf("key=%s", url.QueryEscape(key.Value.GetValue()))
 	}
-	completeURL := getCompleteURLForGeminiEndpoint(request.Model, region, projectID, projectNumber, ":predict")
+	method := ":predict"
+	if geminiEmbedding {
+		method = ":embedContent"
+	}
+	completeURL := getCompleteURLForGeminiEndpoint(request.Model, region, projectID, projectNumber, method)
 
 	// Create HTTP request for streaming
 	req := fasthttp.AcquireRequest()
@@ -1862,8 +1870,14 @@ func (provider *VertexProvider) Embedding(ctx *schemas.BifrostContext, key schem
 
 	// Parse Vertex's native embedding response using typed response
 	var vertexResponse VertexEmbeddingResponse
+	var geminiResponse VertexGeminiEmbeddingResponse
 	pt, ph := providerUtils.StartResponseParseSpan(ctx)
-	umErr := sonic.Unmarshal(responseBody, &vertexResponse)
+	var umErr error
+	if geminiEmbedding {
+		umErr = sonic.Unmarshal(responseBody, &geminiResponse)
+	} else {
+		umErr = sonic.Unmarshal(responseBody, &vertexResponse)
+	}
 	if pt != nil {
 		if umErr != nil {
 			pt.EndSpan(ph, schemas.SpanStatusError, "response parse failed")
@@ -1877,9 +1891,17 @@ func (provider *VertexProvider) Embedding(ctx *schemas.BifrostContext, key schem
 
 	// Use centralized Vertex converter
 	ct, ch := providerUtils.StartResponseConvertorSpan(ctx)
-	bifrostResponse := vertexResponse.ToBifrostEmbeddingResponse()
+	var bifrostResponse *schemas.BifrostEmbeddingResponse
+	if geminiEmbedding {
+		bifrostResponse = geminiResponse.ToBifrostEmbeddingResponse()
+	} else {
+		bifrostResponse = vertexResponse.ToBifrostEmbeddingResponse()
+	}
 	if ct != nil {
 		ct.EndSpan(ch, schemas.SpanStatusOk, "")
+	}
+	if bifrostResponse == nil {
+		return nil, providerUtils.EnrichError(ctx, providerUtils.NewBifrostOperationError(schemas.ErrProviderResponseUnmarshal, fmt.Errorf("vertex returned no embedding")), jsonBody, responseBody, provider.sendBackRawRequest, provider.sendBackRawResponse)
 	}
 
 	// Set ExtraFields
